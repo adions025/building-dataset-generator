@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Parallel yearly thumbnail generation for ICGC Territorial orthophotos.
-Runs the per-year work in parallel to speed up long ranges; inside each year,
-buildings are still processed sequentially to avoid overloading the WMS.
+"""Generate per-building thumbnails from ICGC Territorial orthophotos.
+
+Years can run concurrently; buildings within each year remain sequential to
+avoid overloading the WMS service.
 """
 from __future__ import annotations
 
@@ -223,7 +223,7 @@ def log(msg: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Parallel thumbnails from ICGC Territorial orthophoto (per-year concurrency)."
+        description="Generate per-building thumbnails from ICGC Territorial orthophotos."
     )
     p.add_argument("--city", required=True, help="Municipality name, e.g. 'Nulles'.")
     p.add_argument("--year-ini", type=int, required=True, help="Initial year (inclusive).")

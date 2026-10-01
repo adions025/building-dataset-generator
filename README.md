@@ -7,7 +7,7 @@ Los datos catastrales se obtienen mediante la fuente `atom` y se procesan en par
 ## Uso
 
 ```bash
-python src/thumbs_par.py \
+python src/thumbs_generator.py \
   --city "<MUNICIPIO>" \
   --max-workers 4 \
   --year-ini 2012 \
@@ -30,13 +30,13 @@ python src/thumbs_par.py \
 ### Barcelona
 
 ```bash
-python src/thumbs_par.py --city "Sitges" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Barcelona"
+python src/thumbs_generator.py --city "Sitges" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Barcelona"
 ```
 
 ### Tarragona
 
 ```bash
-python src/thumbs_par.py --city "Reus" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Tarragona"
+python src/thumbs_generator.py --city "Reus" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Tarragona"
 ```
 
 ## Procesar un único año
@@ -44,7 +44,7 @@ python src/thumbs_par.py --city "Reus" --max-workers 4 --year-ini 2012 --year-en
 Para generar los tiles correspondientes a un único año, se debe utilizar el mismo valor en `--year-ini` y `--year-end`.
 
 ```bash
-python src/thumbs_par.py --city "Valldoreix" --max-workers 1 --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona"
+python src/thumbs_generator.py --city "Valldoreix" --max-workers 1 --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona"
 ```
 
 ## Fuentes de datos locales
@@ -76,7 +76,7 @@ Cada fichero tiene una finalidad diferente:
 Para un municipio oficial, Catastro ATOM proporciona los edificios y el ICGC proporciona el límite municipal. Por ejemplo, para Rubí:
 
 ```bash
-python src/thumbs_par.py --city "Rubí" --year-ini 2025 --year-end 2025 --cadastre-source atom --province "Barcelona" --max-workers 4
+python src/thumbs_generator.py --city "Rubí" --year-ini 2025 --year-end 2025 --cadastre-source atom --province "Barcelona" --max-workers 4
 ```
 
 Los resultados se guardan en `outputs/Rubí/2025`.
@@ -94,13 +94,13 @@ Carpeta de salida:     outputs/Valldoreix/<AÑO>
 Ejemplo:
 
 ```bash
-python src/thumbs_par.py --city "Valldoreix" --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona" --max-workers 4
+python src/thumbs_generator.py --city "Valldoreix" --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona" --max-workers 4
 ```
 
 Para procesar otra delimitación local se puede proporcionar cualquier GeoJSON, Shapefile o GeoPackage poligonal con `--aoi-mode file` y `--aoi-file`:
 
 ```bash
-python src/thumbs_par.py --city "Nombre del área" --cadastre-city "Municipio oficial" --year-ini 2024 --year-end 2024 --cadastre-source atom --province "Barcelona" --aoi-mode file --aoi-file "data_sources/boundaries/limite_local.geojson"
+python src/thumbs_generator.py --city "Nombre del área" --cadastre-city "Municipio oficial" --year-ini 2024 --year-end 2024 --cadastre-source atom --province "Barcelona" --aoi-mode file --aoi-file "data_sources/boundaries/limite_local.geojson"
 ```
 
 ### Polígonos etiquetados mediante GeoPackage
@@ -108,7 +108,7 @@ python src/thumbs_par.py --city "Nombre del área" --cadastre-city "Municipio of
 La opción `--gt-polygons` utiliza directamente los polígonos del GeoPackage. El programa busca automáticamente el fichero dentro de `data_sources/ground_truth`, por lo que basta con indicar su nombre:
 
 ```bash
-python src/thumbs_par.py --city "Valldoreix" --year-ini 2024 --year-end 2024 --gt-polygons "Valldoreix_polygons.gpkg" --gt-filter positive --max-workers 1
+python src/thumbs_generator.py --city "Valldoreix" --year-ini 2024 --year-end 2024 --gt-polygons "Valldoreix_polygons.gpkg" --gt-filter positive --max-workers 1
 ```
 
 `--gt-filter positive` conserva para cada año solamente los edificios cuyo campo `GT_<AÑO>` sea distinto de cero. Con `--gt-filter all` se procesan todos los polígonos.
@@ -117,4 +117,4 @@ python src/thumbs_par.py --city "Valldoreix" --year-ini 2024 --year-end 2024 --g
 
 El ZIP administrativo no contiene edificios ni ortofotos. Solamente permite obtener el contorno de un municipio. `icgc.py` está preparado para buscarlo automáticamente en `data_sources/boundaries` y, si no está disponible, recurrir al servicio web del ICGC.
 
-`thumbs_par.py` utiliza `icgc.py`: primero intenta leer este ZIP local y, si no está disponible o no contiene un municipio válido, recurre automáticamente al servicio web del ICGC.
+`thumbs_generator.py` utiliza `icgc.py`: primero intenta leer este ZIP local y, si no está disponible o no contiene un municipio válido, recurre automáticamente al servicio web del ICGC.
