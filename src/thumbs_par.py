@@ -15,6 +15,16 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
+# Conda keeps GDAL/PROJ resources below Library/share on Windows, but they are
+# not always exported when Python is launched by absolute path from an IDE.
+_conda_share = os.path.join(sys.prefix, "Library", "share")
+_gdal_data = os.path.join(_conda_share, "gdal")
+_proj_data = os.path.join(_conda_share, "proj")
+if "GDAL_DATA" not in os.environ and os.path.isdir(_gdal_data):
+    os.environ["GDAL_DATA"] = _gdal_data
+if "PROJ_LIB" not in os.environ and os.path.isdir(_proj_data):
+    os.environ["PROJ_LIB"] = _proj_data
+
 import geopandas as gpd
 import pandas as pd
 
@@ -71,7 +81,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--year-end", type=int, required=True, help="Final year (inclusive).")
     p.add_argument("--margin", type=float, default=DEFAULT_MARGIN_M, help="Margin around building (meters).")
     p.add_argument("--mpp", type=float, default=UNIFORM_MPP, help="Uniform meters-per-pixel for requests.")
-    p.add_argument("--outroot", default=DEFAULT_OUTROOT, help="Output root (CITY/YEAR/*.png).")
+    p.add_argument(
+        "--outroot",
+        default=DEFAULT_OUTROOT,
+        help="Output root (default: PROJECT_ROOT/data; layout CITY/YEAR/*.png).",
+    )
     p.add_argument("--cadastre", help="Path to local cadastral shapefile (buildings).")
     p.add_argument("--cadastre-source", choices=["file", "atom"], default="file",
                    help="Where to get buildings: local file or Cadastre ATOM download.")
