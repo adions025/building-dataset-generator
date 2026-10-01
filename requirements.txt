@@ -3,6 +3,7 @@ shapely>=2.0
 fiona>=1.9
 pyproj>=3.6
 rasterio>=1.3
+affine>=2.4
 
 # Spatial index for GeoPandas
 rtree>=1.2.0
@@ -11,3 +12,6 @@ rtree>=1.2.0
 pandas>=2.0
 numpy>=1.24
 requests>=2.31
+
+# Code formatting
+black>=24.0

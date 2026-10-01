@@ -1,55 +1,71 @@
 # Building Tiles Generator
 
-Script para generar **tiles de edificios a partir de datos del Catastro**, procesando la información por municipio, provincia y rango de años.
+Genera imágenes recortadas por edificio y año a partir de geometrías catastrales y ortofotos históricas del ICGC.
 
-Los datos catastrales se obtienen mediante la fuente `atom` y se procesan en paralelo utilizando varios workers.
+Los edificios pueden proceder de Catastro ATOM, un archivo local o un GeoPackage de *ground truth*. Los resultados se escriben en `outputs/<LOCALIDAD>/<AÑO>`.
+
+## Requisitos
+
+- Python 3.11.
+- GDAL, GeoPandas, Rasterio y Shapely.
+- Internet para Catastro ATOM y las ortofotos del ICGC.
+
+## Entorno Conda
+
+Conda es el único método de instalación mantenido por el proyecto. Desde la raíz del repositorio, crea y activa el entorno:
+
+```bash
+conda env create -f environment.yml
+conda activate geo
+```
+
+La creación solo es necesaria la primera vez. Si cambia `environment.yml`, actualiza el entorno existente y vuelve a activarlo:
+
+```bash
+conda env update -f environment.yml --prune
+conda activate geo
+```
+
+Para comprobar que se está utilizando el intérprete del entorno:
+
+```bash
+python --version
+conda info --envs
+```
 
 ## Uso
 
+Con el entorno `geo` activado, ejecuta el generador desde la raíz del proyecto:
+
 ```bash
-python src/thumbs_generator.py \
-  --city "<MUNICIPIO>" \
-  --max-workers 4 \
-  --year-ini 2012 \
-  --year-end 2024 \
+python src/main.py \
+  --city "Rubí" \
+  --province "Barcelona" \
+  --year-ini 2024 \
+  --year-end 2025 \
   --cadastre-source atom \
-  --province "<PROVINCIA>"
+  --max-workers 2
 ```
 
-## Parámetros
+`--max-workers` controla cuántos años se procesan simultáneamente. Los edificios de cada año se solicitan secuencialmente para no sobrecargar el WMS.
 
-* `--city`: Municipio que se quiere procesar.
-* `--province`: Provincia a la que pertenece el municipio.
-* `--max-workers`: Número máximo de workers utilizados para procesar los datos en paralelo.
-* `--year-ini`: Año inicial de los datos catastrales a procesar.
-* `--year-end`: Año final de los datos catastrales a procesar.
-* `--cadastre-source`: Fuente utilizada para obtener los datos del Catastro. Actualmente se utiliza `atom`.
-
-## Ejemplos
-
-### Barcelona
+Prueba breve:
 
 ```bash
-python src/thumbs_generator.py --city "Sitges" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Barcelona"
+python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10
 ```
 
-### Tarragona
+## Logs
 
-```bash
-python src/thumbs_generator.py --city "Reus" --max-workers 4 --year-ini 2012 --year-end 2025 --cadastre-source atom --province "Tarragona"
+Cada ejecución escribe en consola y en:
+
+```text
+outputs/<LOCALIDAD>/generation.log
 ```
 
-## Procesar un único año
+El log se conserva entre ejecuciones y rota al alcanzar 10 MB. Se mantienen hasta tres copias anteriores (`generation.log.1`, etc.).
 
-Para generar los tiles correspondientes a un único año, se debe utilizar el mismo valor en `--year-ini` y `--year-end`.
-
-```bash
-python src/thumbs_generator.py --city "Valldoreix" --max-workers 1 --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona"
-```
-
-## Fuentes de datos locales
-
-El proyecto separa los resultados generados de las fuentes geográficas de entrada por ejemplo:
+## Fuentes locales
 
 ```text
 data_sources/
@@ -58,63 +74,87 @@ data_sources/
 │   └── valldoreix_boundary.geojson
 └── ground_truth/
     └── Valldoreix_polygons.gpkg
-
-outputs/
-└── <LOCALIDAD>/<AÑO>/
 ```
 
-Cada fichero tiene una finalidad diferente:
-
-| Fichero | Contenido | Uso |
+| Fuente | Contenido | Uso |
 | --- | --- | --- |
-| `divisions-administratives-v2r1-20250730.zip` | Límites oficiales de los municipios de Cataluña | Permite que `icgc.py` localice un municipio sin consultar por Internet el servicio de divisiones administrativas del ICGC. |
-| `valldoreix_boundary.geojson` | Una geometría con el límite específico de Valldoreix | Recorta los edificios de Sant Cugat del Vallès para conservar solamente los que pertenecen a Valldoreix. |
-| `Valldoreix_polygons.gpkg` | 8.136 polígonos de edificios con columnas `GT_2007` a `GT_2024` | Permite trabajar directamente con el conjunto *ground truth*, sin descargar los edificios mediante Catastro ATOM. |
+| ZIP administrativo | Límites municipales oficiales de Cataluña | Se consulta antes que el servicio web del ICGC. |
+| GeoJSON de Valldoreix | Límite submunicipal | Recorta los edificios de Sant Cugat del Vallès. |
+| GeoPackage GT | Edificios etiquetados mediante `GT_<AÑO>` | Sustituye la descarga de edificios de Catastro. |
 
-### Municipio oficial mediante Catastro ATOM
-
-Para un municipio oficial, Catastro ATOM proporciona los edificios y el ICGC proporciona el límite municipal. Por ejemplo, para Rubí:
+### Valldoreix mediante Catastro
 
 ```bash
-python src/thumbs_generator.py --city "Rubí" --year-ini 2025 --year-end 2025 --cadastre-source atom --province "Barcelona" --max-workers 4
+python src/main.py --city "Valldoreix" --province "Barcelona" --year-ini 2024 --year-end 2024
 ```
 
-Los resultados se guardan en `outputs/Rubí/2025`.
+El programa descarga Sant Cugat del Vallès y aplica automáticamente `valldoreix_boundary.geojson`.
 
-### Área submunicipal mediante GeoJSON
+### Valldoreix mediante ground truth
 
-Valldoreix forma parte de Sant Cugat del Vallès y no dispone de una descarga catastral municipal independiente. Al utilizar `--city "Valldoreix"`, el programa aplica automáticamente estas opciones:
+```bash
+python src/main.py \
+  --city "Valldoreix" \
+  --year-ini 2024 \
+  --year-end 2024 \
+  --gt-polygons "Valldoreix_polygons.gpkg" \
+  --gt-filter positive \
+  --max-workers 1
+```
+
+### Límite personalizado
+
+```bash
+python src/main.py \
+  --city "Nombre del área" \
+  --cadastre-city "Municipio oficial" \
+  --province "Barcelona" \
+  --year-ini 2024 \
+  --year-end 2024 \
+  --aoi-mode file \
+  --aoi-file "data_sources/boundaries/limite_local.geojson"
+```
+
+## Estructura
 
 ```text
-Municipio de Catastro: Sant Cugat del Vallès
-Límite de recorte:    data_sources/boundaries/valldoreix_boundary.geojson
-Carpeta de salida:     outputs/Valldoreix/<AÑO>
+src/
+├── main.py                    # Punto de entrada
+└── building_tiles/
+    ├── config.py              # Configuración y validación
+    ├── models.py              # Modelos tipados
+    ├── geometry.py            # Reglas geométricas y temporales
+    ├── catastro.py            # Cliente Catastro ATOM
+    ├── icgc.py                # Límites y ortofotos ICGC
+    ├── local_data.py          # GeoJSON, GPKG y archivos locales
+    ├── imaging.py             # Máscaras y métricas
+    ├── storage.py             # PNG e índices
+    └── generator.py           # Coordinación y concurrencia
+
+tests/                         # Tests sin servicios externos reales
+data_sources/                  # Fuentes geográficas locales
+outputs/                       # Resultados generados; ignorados por Git
 ```
 
-Ejemplo:
+`main.py` contiene solamente la frontera de terminal y el logging. La lógica sigue la dirección `main -> generador -> componentes especializados`; los clientes y las funciones geométricas no dependen del ejecutable.
+
+## Formato del código
 
 ```bash
-python src/thumbs_generator.py --city "Valldoreix" --year-ini 2018 --year-end 2018 --cadastre-source atom --province "Barcelona" --max-workers 4
+python -m black src tests
 ```
 
-Para procesar otra delimitación local se puede proporcionar cualquier GeoJSON, Shapefile o GeoPackage poligonal con `--aoi-mode file` y `--aoi-file`:
+Black es opcional para ejecutar el generador, pero permite mantener un formato uniforme en el código.
 
-```bash
-python src/thumbs_generator.py --city "Nombre del área" --cadastre-city "Municipio oficial" --year-ini 2024 --year-end 2024 --cadastre-source atom --province "Barcelona" --aoi-mode file --aoi-file "data_sources/boundaries/limite_local.geojson"
+## Salidas
+
+```text
+outputs/<LOCALIDAD>/
+├── generation.log
+├── building_index.csv
+├── building_index.gpkg
+└── <AÑO>/
+    └── *.png
 ```
 
-### Polígonos etiquetados mediante GeoPackage
-
-La opción `--gt-polygons` utiliza directamente los polígonos del GeoPackage. El programa busca automáticamente el fichero dentro de `data_sources/ground_truth`, por lo que basta con indicar su nombre:
-
-```bash
-python src/thumbs_generator.py --city "Valldoreix" --year-ini 2024 --year-end 2024 --gt-polygons "Valldoreix_polygons.gpkg" --gt-filter positive --max-workers 1
-```
-
-`--gt-filter positive` conserva para cada año solamente los edificios cuyo campo `GT_<AÑO>` sea distinto de cero. Con `--gt-filter all` se procesan todos los polígonos.
-
-### Límites municipales del ZIP
-
-El ZIP administrativo no contiene edificios ni ortofotos. Solamente permite obtener el contorno de un municipio. `icgc.py` está preparado para buscarlo automáticamente en `data_sources/boundaries` y, si no está disponible, recurrir al servicio web del ICGC.
-
-`thumbs_generator.py` utiliza `icgc.py`: primero intenta leer este ZIP local y, si no está disponible o no contiene un municipio válido, recurre automáticamente al servicio web del ICGC.
+Las fuentes originales permanecen en `data_sources/`; `outputs/` solo contiene datos derivados.

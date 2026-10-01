@@ -49,6 +49,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 cover/
 
 # Translations
@@ -149,6 +150,10 @@ cython_debug/
 # imgs
 *.png
 *.jpg
+
+# Generated application outputs (keep the explanatory README)
+outputs/*
+!outputs/README.md
 
 # other
 /src/module/business/datamodels/git-base-textcaps/*
