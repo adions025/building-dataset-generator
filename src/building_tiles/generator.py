@@ -246,6 +246,7 @@ class ThumbnailGenerator:
             year_buildings,
             self.config.meters_per_pixel,
             self.config.margin_meters,
+            include_context=self.config.include_context,
         )
         output_directory = self.config.city_output_directory / str(year)
         debug_directory = (
@@ -269,13 +270,17 @@ class ThumbnailGenerator:
                 metrics = calculate_quality_metrics(
                     raster.pixels, job.geometry, raster.transform
                 )
-                masked = white_outside_geometry(
-                    raster.pixels, job.geometry, raster.transform
+                output_pixels = (
+                    raster.pixels
+                    if self.config.include_context
+                    else white_outside_geometry(
+                        raster.pixels, job.geometry, raster.transform
+                    )
                 )
 
                 if saved < self.config.debug_first:
                     save_png(debug_directory / f"{output_id}_raw.png", raster.pixels)
-                save_png(output_directory / f"{output_id}.png", masked)
+                save_png(output_directory / f"{output_id}.png", output_pixels)
                 saved += 1
                 LOGGER.debug(
                     "Year %d tile %s: coverage=%.4f raw_min=%.1f raw_max=%.1f raw_std=%.2f",

@@ -62,6 +62,7 @@ class GenerationConfig:
     include_year_in_name: bool = True
     ids_from_directories: tuple[Path, ...] = ()
     keep_multipart_buildings: bool = False
+    include_context: bool = False
     debug_first: int = 0
     limit: int = 0
     start_date_field: str = "FECHAALTA"

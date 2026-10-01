@@ -272,12 +272,13 @@ def create_tile_jobs(
     buildings: gpd.GeoDataFrame,
     meters_per_pixel: float,
     margin_meters: float,
+    include_context: bool = False,
 ) -> list[TileJob]:
     jobs = []
     for geometry in buildings.geometry:
         if geometry is None or geometry.is_empty:
             continue
-        bbox = bbox_with_margin(geometry, margin_meters)
+        bbox = bbox_with_margin(geometry, 0 if include_context else margin_meters)
         width, height = image_size(bbox, meters_per_pixel)
         jobs.append(TileJob(geometry_hash_id(geometry), geometry, bbox, width, height))
     return jobs

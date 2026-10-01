@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ids-from-dir", type=Path, nargs="*", default=[])
 
     parser.add_argument("--keep-multipart-buildings", action="store_true")
+    parser.add_argument(
+        "--include-context",
+        action="store_true",
+        help="Keep the complete bounding-box image without masking its surroundings.",
+    )
     parser.add_argument("--debug-first", type=int, default=0)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument(
@@ -110,6 +115,7 @@ def config_from_args(args: argparse.Namespace) -> GenerationConfig:
         include_year_in_name=not args.omit_year_in_name,
         ids_from_directories=tuple(args.ids_from_dir),
         keep_multipart_buildings=args.keep_multipart_buildings,
+        include_context=args.include_context,
         debug_first=args.debug_first,
         limit=args.limit,
         start_date_field=args.alta_field,
@@ -151,6 +157,44 @@ def configure_logging(config: GenerationConfig, verbose: bool = False) -> Path:
     return log_path
 
 
+def log_run_configuration(
+    logger: logging.Logger,
+    config: GenerationConfig,
+    verbose: bool,
+) -> None:
+    source = (
+        "ground-truth"
+        if config.uses_ground_truth
+        else f"cadastre:{config.cadastre_source}"
+    )
+    image_mode = (
+        "context (exact geometry bounds)"
+        if config.include_context
+        else f"masked (margin={config.margin_meters:g} m)"
+    )
+    if config.uses_ground_truth:
+        multipart_mode = "as provided by ground truth"
+    else:
+        multipart_mode = (
+            "keep together" if config.keep_multipart_buildings else "split components"
+        )
+    limit = str(config.limit) if config.limit else "all"
+    logger.info(
+        "Run options | source=%s | image=%s | multipart=%s | aoi=%s | "
+        "resolution=%g m/px | years=%d-%d | workers=%d | limit=%s | verbose=%s",
+        source,
+        image_mode,
+        multipart_mode,
+        config.aoi_mode,
+        config.meters_per_pixel,
+        config.year_start,
+        config.year_end,
+        config.max_workers,
+        limit,
+        "yes" if verbose else "no",
+    )
+
+
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
     try:
         coordinates = tuple(float(item) for item in value.split(","))
@@ -185,6 +229,7 @@ def main(arguments: list[str] | None = None) -> int:
     log_path = configure_logging(config, verbose=args.verbose)
     logger = logging.getLogger(__name__)
     logger.info("Starting generation for %s; log=%s", config.city, log_path)
+    log_run_configuration(logger, config, args.verbose)
     try:
         ThumbnailGenerator(config).run()
     except KeyboardInterrupt:
