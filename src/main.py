@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import warnings
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -71,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-multipart-buildings", action="store_true")
     parser.add_argument("--debug-first", type=int, default=0)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show debug logs and expected Rasterio georeferencing warnings.",
+    )
     parser.add_argument("--alta-field", default="FECHAALTA")
     parser.add_argument("--baja-field", default="FECHABAJA")
 
@@ -155,19 +161,28 @@ def _parse_bbox(value: str) -> tuple[float, float, float, float]:
     return coordinates
 
 
+def configure_warnings(verbose: bool) -> None:
+    from rasterio.errors import NotGeoreferencedWarning
+
+    action = "always" if verbose else "ignore"
+    warnings.filterwarnings(action, category=NotGeoreferencedWarning)
+
+
 def main(arguments: list[str] | None = None) -> int:
     configure_geospatial_environment()
-    from building_tiles.generator import ThumbnailGenerator
-
     parser = build_parser()
     args = parser.parse_args(arguments)
+    configure_warnings(args.verbose)
+
+    from building_tiles.generator import ThumbnailGenerator
+
     try:
         config = config_from_args(args)
         config.validate()
     except ValueError as exc:
         parser.error(str(exc))
 
-    log_path = configure_logging(config)
+    log_path = configure_logging(config, verbose=args.verbose)
     logger = logging.getLogger(__name__)
     logger.info("Starting generation for %s; log=%s", config.city, log_path)
     try:
