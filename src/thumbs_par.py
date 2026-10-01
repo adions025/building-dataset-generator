@@ -14,6 +14,7 @@ import warnings
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from typing import List, Tuple
 
 # Conda keeps GDAL/PROJ resources below Library/share on Windows, but they are
 # not always exported when Python is launched by absolute path from an IDE.
@@ -31,41 +32,189 @@ import pandas as pd
 from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon, box as sbox
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize, unary_union
+from rasterio import features
 from rasterio.errors import NotGeoreferencedWarning
+from rasterio.io import MemoryFile
 
-from icgc_old import get_municipality_gdf, territorial_getmap_rgb
+from icgc import (
+    compute_bbox_with_margin,
+    get_municipality_gdf,
+    pick_image_size,
+    territorial_getmap_rgb,
+)
 from catastro_atom import download_municipality_buildings
 from masking import white_outside_polygon
 from ids import geometry_hash_id
 
-# Reuse helpers from the sequential script to avoid code drift
-from thumbs import (
-    DEFAULT_MARGIN_M,
-    UNIFORM_MPP,
-    MAX_W,
-    MAX_H,
-    DEFAULT_OUTROOT,
-    DEFAULT_DEBUG_FIRST,
-    ensure_epsg25831,
-    clean_cadastre_records,
-    filter_by_cadastre_year,
-    robust_city_clip,
-    precompute_jobs,
-    save_png_array,
-    write_building_index,
-    qc_metrics,
-    _parse_bbox,
-)
-
 warnings.simplefilter("ignore", NotGeoreferencedWarning)
 print_lock = Lock()
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BOUNDARIES_DIR = os.path.join(PROJECT_ROOT, "data_sources", "boundaries")
+GROUND_TRUTH_DIR = os.path.join(PROJECT_ROOT, "data_sources", "ground_truth")
+DEFAULT_OUTROOT = os.path.join(PROJECT_ROOT, "outputs")
+
+DEFAULT_MARGIN_M = 0.5
+UNIFORM_MPP = 0.25
+MAX_W = 2048
+MAX_H = 2048
+DEFAULT_DEBUG_FIRST = 0
 
 SUBMUNICIPAL_AOIS = {
     "valldoreix": {
         "cadastre_city": "Sant Cugat del Vallès",
-        "aoi_file": "result.geojson",
+        "aoi_file": os.path.join(BOUNDARIES_DIR, "valldoreix_boundary.geojson"),
     },
 }
+
+
+def ensure_epsg25831(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    if gdf.crs is None:
+        raise RuntimeError("Input layer has no CRS. Please define/reproject to EPSG:25831.")
+    if str(gdf.crs).upper() != "EPSG:25831":
+        return gdf.to_crs("EPSG:25831")
+    return gdf
+
+
+def _parse_bbox(value: str) -> tuple[float, float, float, float]:
+    parts = [float(item) for item in value.split(",")]
+    if len(parts) != 4:
+        raise ValueError("--aoi-bbox must be 'minx,miny,maxx,maxy'")
+    return tuple(parts)
+
+
+def _year_from_yyyymmdd_series(series: pd.Series) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce")
+    return (values // 10000).astype("Int64")
+
+
+def clean_cadastre_records(
+    gdf: gpd.GeoDataFrame,
+    alta_field: str = "FECHAALTA",
+    baja_field: str = "FECHABAJA",
+) -> gpd.GeoDataFrame:
+    if alta_field not in gdf.columns or baja_field not in gdf.columns:
+        return gdf.copy()
+
+    alta_y = _year_from_yyyymmdd_series(gdf[alta_field])
+    baja_raw = pd.to_numeric(gdf[baja_field], errors="coerce")
+    baja_y = (baja_raw // 10000).astype("Int64")
+    is_open = baja_raw == 99999999
+    baja_y = baja_y.where(~is_open, 9999)
+
+    same_year = (~is_open) & alta_y.notna() & baja_y.notna() & (alta_y == baja_y)
+    end_before_start = alta_y.notna() & baja_y.notna() & (baja_y < alta_y)
+    keep_mask = ~(same_year | end_before_start)
+
+    cleaned = gdf.loc[keep_mask].copy()
+    cleaned["__alta_y"] = alta_y[keep_mask]
+    cleaned["__baja_y"] = baja_y[keep_mask]
+    return cleaned
+
+
+def filter_by_cadastre_year(
+    gdf: gpd.GeoDataFrame,
+    year: int,
+    alta_field: str = "FECHAALTA",
+    baja_field: str = "FECHABAJA",
+) -> gpd.GeoDataFrame:
+    if "__alta_y" in gdf.columns and "__baja_y" in gdf.columns:
+        alta_y = gdf["__alta_y"]
+        baja_y = gdf["__baja_y"]
+    elif alta_field in gdf.columns and baja_field in gdf.columns:
+        alta_y = _year_from_yyyymmdd_series(gdf[alta_field])
+        baja_raw = pd.to_numeric(gdf[baja_field], errors="coerce")
+        baja_y = (baja_raw // 10000).astype("Int64")
+        baja_y = baja_y.where(baja_raw != 99999999, 9999)
+    else:
+        log(f"[YEAR {year}] INFO: '{alta_field}'/'{baja_field}' not found -> no temporal filter applied.")
+        return gdf.copy()
+
+    alta_y = alta_y.reindex(gdf.index).fillna(-9999)
+    baja_y = baja_y.reindex(gdf.index).fillna(9999)
+    return gdf.loc[(alta_y < year) & (year < baja_y)].copy()
+
+
+def robust_city_clip(
+    buildings: gpd.GeoDataFrame,
+    muni_geom: BaseGeometry,
+) -> gpd.GeoDataFrame:
+    try:
+        candidate_indexes = list(buildings.sindex.intersection(muni_geom.bounds))
+        candidates = buildings.iloc[candidate_indexes]
+    except Exception:
+        minx, miny, maxx, maxy = muni_geom.bounds
+        candidates = buildings.cx[minx:maxx, miny:maxy]
+    return candidates[candidates.geometry.intersects(muni_geom)].copy()
+
+
+def precompute_jobs(
+    buildings: gpd.GeoDataFrame,
+    mpp: float,
+    margin_m: float,
+    max_side: int,
+) -> List[Tuple[str, BaseGeometry, Tuple[float, float, float, float], int, int]]:
+    jobs = []
+    for _, row in buildings.iterrows():
+        geom = row.geometry
+        if geom.is_empty:
+            continue
+        bbox = compute_bbox_with_margin(geom, margin_m)
+        width, height = pick_image_size(bbox, mpp, max_px=max_side)
+        jobs.append((geometry_hash_id(geom, rounding_precision=3), geom, bbox, width, height))
+    return jobs
+
+
+def save_png_array(path: str, array) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    profile = {
+        "driver": "PNG",
+        "width": array.shape[2],
+        "height": array.shape[1],
+        "count": array.shape[0],
+        "dtype": "uint8",
+    }
+    with MemoryFile() as memory_file:
+        with memory_file.open(**profile) as dataset:
+            dataset.write(array)
+        with open(path, "wb") as output_file:
+            output_file.write(memory_file.read())
+
+
+def write_building_index(buildings: gpd.GeoDataFrame, outdir: str) -> None:
+    out_csv = os.path.join(outdir, "building_index.csv")
+    out_gpkg = os.path.join(outdir, "building_index.gpkg")
+    rows = []
+    for _, row in buildings.iterrows():
+        geometry_id = geometry_hash_id(row.geometry, 3)
+        centroid = row.geometry.centroid
+        rows.append({
+            "id": geometry_id,
+            "area_m2": float(row.geometry.area),
+            "centroid_e": float(centroid.x),
+            "centroid_n": float(centroid.y),
+        })
+
+    os.makedirs(outdir, exist_ok=True)
+    pd.DataFrame(rows).drop_duplicates("id").to_csv(out_csv, index=False)
+    indexed = buildings.copy()
+    indexed["id"] = [geometry_hash_id(geometry, 3) for geometry in indexed.geometry]
+    indexed[["id", "geometry"]].to_file(out_gpkg, layer="buildings", driver="GPKG")
+    log(f"[INDEX] wrote {out_csv} and {out_gpkg}")
+
+
+def qc_metrics(array, geom: BaseGeometry, transform):
+    height, width = array.shape[1], array.shape[2]
+    mask = features.rasterize(
+        [(geom, 1)],
+        out_shape=(height, width),
+        transform=transform,
+        fill=0,
+        all_touched=True,
+        dtype="uint8",
+    ).astype(bool)
+    coverage = float(mask.mean()) if mask.size else 0.0
+    return coverage, float(array.min()), float(array.max()), float(array.std())
 
 def log(msg: str) -> None:
     with print_lock:
@@ -84,7 +233,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--outroot",
         default=DEFAULT_OUTROOT,
-        help="Output root (default: PROJECT_ROOT/data; layout CITY/YEAR/*.png).",
+        help="Output root (default: PROJECT_ROOT/outputs; layout CITY/YEAR/*.png).",
     )
     p.add_argument("--cadastre", help="Path to local cadastral shapefile (buildings).")
     p.add_argument("--cadastre-source", choices=["file", "atom"], default="file",
@@ -271,6 +420,7 @@ def _find_aoi_file(path: str) -> str:
 def _find_existing_file(path: str) -> str:
     candidates = [
         path,
+        os.path.join(GROUND_TRUTH_DIR, path),
         os.path.join(os.getcwd(), path),
         os.path.join(os.path.dirname(os.getcwd()), path),
         os.path.join(os.path.dirname(__file__), path),

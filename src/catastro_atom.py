@@ -170,8 +170,9 @@ def download_municipality_buildings(municipality: str, province: str | None = No
 
         for title, href in entries:
             title_can = _canon_name(title)
-            # exact canonical match preferred; substring fallback helps with odd feed tails
-            if title_can == wanted or wanted in title_can:
+            # Require an exact municipality name: a substring match makes
+            # short names unsafe (for example, Rubi also matches Rubio).
+            if title_can == wanted:
                 z = requests.get(href, timeout=120)
                 z.raise_for_status()
                 with zipfile.ZipFile(io.BytesIO(z.content)) as zf:

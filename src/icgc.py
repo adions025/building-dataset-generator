@@ -5,7 +5,6 @@ import unicodedata
 import geopandas as gpd
 from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds
-# from osm_admin import get_admin_boundary_gdf
 
 TARGET_CRS = "EPSG:25831"
 
@@ -20,6 +19,7 @@ ARCGIS_MUNIS_QUERY = (
 
 LOCAL_MUNI_ZIP_NAME = "divisions-administratives-v2r1-20250730.zip"
 LOCAL_MUNI_SHP = "divisions-administratives-v2r1-municipis-5000-20250730.shp"
+LOCAL_BOUNDARIES_DIR = "data_sources/boundaries"
 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKD", s or "")
@@ -95,7 +95,11 @@ def get_municipality_gdf(city_name: str, province_name: str | None = None) -> gp
     # 1) Try local shapefile inside the provided ZIP
     try:
         from pathlib import Path
-        zip_path = Path(__file__).resolve().parent.parent / LOCAL_MUNI_ZIP_NAME
+        zip_path = (
+            Path(__file__).resolve().parent.parent
+            / LOCAL_BOUNDARIES_DIR
+            / LOCAL_MUNI_ZIP_NAME
+        )
         if zip_path.exists():
             shp_paths = (
                 f"zip+file://{zip_path}!{LOCAL_MUNI_SHP}",
