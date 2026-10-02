@@ -31,35 +31,25 @@ Para probar el flujo con solo 10 edificios:
 python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --cadastre-source atom --max-workers 1 --limit 10
 ```
 
-`--max-workers` indica cuántos años se procesan simultáneamente. Los edificios de cada año se solicitan de forma secuencial para no sobrecargar el WMS.
+## Opciones principales
 
-## Recorte y contexto
+| Opción | Comportamiento |
+| --- | --- |
+| `--include-context` | Conserva la ortofoto completa dentro de la caja exacta del edificio. No aplica `--margin`. |
+| `--keep-multipart-buildings` | Mantiene juntas las partes separadas de una entidad. Sin esta opción, cada parte genera una imagen. |
+| `--margin METROS` | Añade margen alrededor del edificio. Por defecto: `0.5`. El exterior queda blanco. |
+| `--limit N` | Procesa solo los primeros `N` edificios. Útil para pruebas. |
+| `--max-workers N` | Procesa hasta `N` años simultáneamente. |
+| `--verbose` | Muestra mensajes `DEBUG` y warnings de Rasterio. |
+| `--debug-first N` | Guarda las primeras `N` ortofotos sin máscara en `outputs/_debug/`. |
 
-Por defecto, los píxeles situados fuera del edificio se muestran en blanco. Para conservar la imagen rectangular completa utiliza `--include-context`:
-
-```powershell
-python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10 --include-context
-```
-
-La caja se calcula directamente con los puntos extremos de la geometría: `minX`, `minY`, `maxX` y `maxY`. Contiene el edificio completo, sin añadir un porcentaje de margen y sin pintar de blanco los píxeles exteriores a su forma. El centro de esa caja se mantiene como centro del recorte.
-
-`--margin` se aplica al modo normal con fondo blanco. Estas opciones solo cambian la imagen PNG; la selección de edificios, su geometría y los índices generados no cambian.
-
-## Geometrías multipartes
-
-Una entidad catastral puede contener varios polígonos separados. Por defecto, cada componente genera su propia imagen y se centra individualmente.
-
-Con `--keep-multipart-buildings`, todas las partes de la entidad se mantienen juntas y se genera una única imagen cuya caja contiene el conjunto completo:
-
-```powershell
-python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10 --keep-multipart-buildings
-```
-
-Puede combinarse con `--include-context` para conservar todos los píxeles de la caja que rodea al conjunto:
+Ejemplo con una entidad multiparte completa y su contexto:
 
 ```powershell
 python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10 --keep-multipart-buildings --include-context
 ```
+
+Las opciones de imagen no modifican las geometrías ni los índices generados.
 
 ## Logs y depuración
 
@@ -69,35 +59,19 @@ Cada ejecución muestra el progreso en consola y escribe el mismo registro en:
 outputs/<LOCALIDAD>/generation.log
 ```
 
-El modo normal muestra mensajes `INFO`: descarga de datos, área procesada, número de edificios, progreso por año y resumen final. Los errores de edificios individuales también quedan registrados.
-
-Al comenzar, el log resume las opciones efectivas de la ejecución. Por ejemplo:
+El modo normal registra descarga, área, edificios, progreso y resultado final. Al comenzar resume las opciones efectivas:
 
 ```text
 Run options | source=cadastre:atom | image=context (exact geometry bounds) | multipart=keep together | aoi=muni | resolution=0.25 m/px | years=2025-2025 | workers=1 | limit=10 | verbose=no
 ```
 
-`image` indica si el PNG conserva el contexto o aplica la máscara blanca. `multipart` indica si los componentes se mantienen juntos o se separan.
-
-Los avisos esperados de Rasterio sobre imágenes WMS sin geotransformación integrada se ocultan por defecto. Para mostrar esos warnings y los mensajes `DEBUG`, añade `--verbose`:
+Los warnings esperados de Rasterio se ocultan por defecto. `--verbose` los muestra y añade métricas por imagen (`coverage`, `raw_min`, `raw_max` y `raw_std`):
 
 ```powershell
 python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10 --verbose
 ```
 
-El modo `--verbose` añade una línea por imagen con:
-
-- `coverage`: proporción de píxeles cubierta por el edificio.
-- `raw_min` y `raw_max`: valores mínimo y máximo de la imagen original.
-- `raw_std`: desviación estándar de sus píxeles.
-
-Para guardar también las primeras imágenes originales, antes de aplicar la máscara blanca, utiliza `--debug-first N`:
-
-```powershell
-python src/main.py --city "Rubí" --province "Barcelona" --year-ini 2025 --year-end 2025 --limit 10 --debug-first 3
-```
-
-Estas imágenes se guardan en `outputs/_debug/<LOCALIDAD>/<AÑO>/_raw/`. El archivo de log rota al alcanzar 10 MB y conserva tres copias anteriores.
+El archivo rota al alcanzar 10 MB y conserva tres copias anteriores.
 
 ## Fuentes locales
 
